@@ -380,7 +380,7 @@ class Tracer(object):
 
     def __iter__(self):
         for t in range(self.get_total_time()):
-            yield self.cause[t], self.get_nx_graph_at_time(t)
+            yield self.cause[t], self.get_nx_graph_at_n(t)
 
 
 class SimObjectHolder(object):
