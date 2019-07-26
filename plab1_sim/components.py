@@ -9,6 +9,9 @@ import warnings
 
 
 class Scheduler(object):
+    """An abstract scheduler object that is used by links and others to schedule
+    packet sends"""
+
     def __init__(self) -> None:
         pass
 
@@ -17,11 +20,15 @@ class Scheduler(object):
 
 
 class PacketType(Enum):
+    """The type of a packet"""
+
     Data = 1
     Control = 2
 
 
 class Packet(object):
+    """ A packet object"""
+
     def __init__(self, type: PacketType, ttl: int, data: Any) -> None:
         self.type = type
         self.data = pickle.dumps(data)
@@ -29,36 +36,62 @@ class Packet(object):
 
 
 def to_control_packet(data: Any) -> Packet:
+    """ Construct a control packet from an arbitrary variable"""
     # We do not check TTL on control packets, since
     # they do not propagate.
     return Packet(PacketType.Control, 0, data)
 
 
 def to_data_packet(data: Any, ttl: int = 32) -> Packet:
+    """Construct a data packet from an arbitrary variable"""
     return Packet(PacketType.Data, ttl, data)
 
 
 def from_packet(pkt: Packet) -> Any:
+    """Extract data from a packet"""
     return pickle.loads(pkt.data)
 
 
 class PortState(Enum):
-    Up = 1
-    Down = 2
+    """Whether a port is up or down. This means when you have a SwitchRep object `sw`
+    you can check whether port with ID p (an integer) is up by checking if  
+    `sw.port_state(p) == PortState.Up`."""
+
+    Up = 1  #: Port is UP (i.e., packets can flow through the port)
+    Down = 2  #: Port is DOWN (i.e., no packets can flow through the port)
 
 
 class ControlPlane(object):
+    """A control plane object is user code that decides what happens when a control
+    packet is received."""
+
     def __init__(self) -> None:
         pass
 
     def initialize(self, switch: SwitchRep) -> None:
+        """Indicates that a switch is all connected up allowing user code to initialize
+        itself. It is very important that at this point user code should generate some
+        control packets, since in the absence of control packets we will never invoke
+        the control plane again.
+        switch in this case can be used to set ports up or down or to send control
+        packets."""
         raise NotImplementedError
 
     def process_control_packet(self, switch: SwitchRep, port_id, data: Any) -> None:
+        """Called whenever a control packet is received
+         Your options are
+            - Do nothing
+            - Set a port up by calling sw.port_up(id)
+            - Set a port down by calling sw.port_down(id)
+            - Send packets (sw.send_control as above)
+            -  Do some computation.
+        """
         raise NotImplementedError
 
 
 class NetNode(object):
+    """Represents hosts or switches. Things that can receive packets"""
+
     def __init__(self) -> None:
         pass
 
@@ -73,6 +106,8 @@ class NetNode(object):
 
 
 class Host(NetNode):
+    """ A host"""
+
     def __init__(self, id: str, tracer: Optional[Tracer] = None) -> None:
         self.id = id
         self.port = Port(0, id, self)
@@ -95,19 +130,32 @@ class Host(NetNode):
 
 
 class SwitchRep(object):
+    """SwitchRep is a switch abstraction supplied to the control code. It allows
+    the control code to send control messages, set ports up and down, and query
+    for port state."""
+
     def __init__(self, sw: DumbSwitch):
         self.id = sw.id
         self.port_state = [p.state for p in sw.ports]
         self._sw = sw
 
     def send_control(self, port_id: int, data: Any):
+        """Send a control message out port `port_id`. Note
+        messages sent out a port marked down are silently
+        dropped."""
         self._sw.send(port_id, to_control_packet(data))
 
     def port_down(self, port_id: int):
+        """Mark port `port_id` as down"""
         self._sw.set_port_down(port_id)
 
     def port_up(self, port_id: int):
+        """Mark port `port_id` as up"""
         self._sw.set_port_up(port_id)
+
+    def port_status(self, port_id: int):
+        """Get status for port `port_id`"""
+        return self.port_state[port_id]
 
 
 class DumbSwitch(NetNode):
@@ -163,7 +211,7 @@ class DumbSwitch(NetNode):
         elif packet.type == PacketType.Control:
             data = from_packet(packet)
             if self.tracer:
-                cause = "%s (@%s)"%(repr(data), self.id)
+                cause = "%s (@%s)" % (repr(data), self.id)
                 self.tracer.process_control_event(cause)
             self.control.process_control_packet(self.rep, port_id, from_packet(packet))
 
@@ -259,6 +307,9 @@ class BadSender(Exception):
 
 
 class Tracer(object):
+    """The tracer class provides a mechanism for debugging the simulation after the fact. What the
+    tracer refers to as time really is an ordering of control messages processed by the network."""
+
     def __init__(self):
         self.nodes = []
         self.cause = ["initial"]
@@ -292,32 +343,39 @@ class Tracer(object):
         ):
             self.color[self.time][port.link.uniq] = "black"
 
-    def draw_graph_at_time(self, time: int, axs: Optional[Any] = None) -> None:
+    def draw_graph_at_n(self, n: int, axs: Optional[Any] = None) -> None:
+        """Draw the set of active links (in black) and inactive links (in red) after control
+        message `n` was processed."""
         nx.draw(
             self.graph,
             with_labels=True,
             edge_color=[
-                self.color[time][key] for (_, _, key) in self.graph.edges(keys=True)
+                self.color[n][key] for (_, _, key) in self.graph.edges(keys=True)
             ],
             node_size=500,
             font_size=16,
             node_color="white",
-            ax = axs,
+            ax=axs,
         )
 
-    def get_nx_graph_at_time(self, time: int) -> nx.MultiGraph:
+    def get_nx_graph_at_n(self, n: int) -> nx.MultiGraph:
+        """Get a connectivity graph after processing control message `n` is processed"""
         return nx.MultiGraph(
             [
                 (u, v, k)
                 for u, v, k in self.graph.edges(keys=True)
-                if self.color[time][k] == "black"
+                if self.color[n][k] == "black"
             ]
         )
 
-    def get_cause_at_time(self, time: int) -> str:
-        return self.cause[time]
+    def get_cause_at_time(self, n: int) -> str:
+        """Get what the n^{th} control message was. This returns a string of the form
+        `__repr(data) @ switch ID`, and is why having a good `__repr__` string for your
+        Data class is useful."""
+        return self.cause[n]
 
     def get_total_time(self) -> int:
+        """Get the total number of control messages"""
         return self.time + 1
 
     def __iter__(self):
@@ -326,6 +384,10 @@ class Tracer(object):
 
 
 class SimObjectHolder(object):
+    """The SimObjectHolder is just a simple object we can use to check the final result
+    from the simulation. In particular it is responsible for constructing the final
+    forwarding graph produced by your simulation."""
+
     def __init__(self):
         self.net_objects = []  # type: List[NetNode]
 
@@ -355,6 +417,7 @@ class SimObjectHolder(object):
             )
 
     def create_nx_graph(self) -> nx.MultiGraph:
+        """Return the final connectivity graph for this simulation"""
         g = nx.MultiGraph()
         g.add_nodes_from(map(lambda o: o.get_id(), self.net_objects))
         all_links = {}

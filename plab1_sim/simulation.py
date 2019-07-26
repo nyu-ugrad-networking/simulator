@@ -145,15 +145,15 @@ class SimulationSetup(object):
         else:
             raise Exception("Tracing was not enabled")
 
-    def draw_graph_at_time(self, time: int, axs: Optional[Any] = None) -> None:
-        """When tracing is enabled this function will draw (using matplotlib) the network graph at a given
-        time. We assume that someone has already set up matplotlib's plotting environment."""
+    def draw_graph_at_n(self, time: int, axs: Optional[Any] = None) -> None:
+        """When tracing is enabled this function will draw (using matplotlib) the network graph after control message
+        `n` was processed. We assume that someone has already set up matplotlib's plotting environment."""
         if self.tracer is not None:
-            self.tracer.draw_graph_at_time(time, axs=axs)
+            self.tracer.draw_graph_at_n(time, axs=axs)
         else:
             raise Exception("Tracing was not enabled")
 
-    def get_cause_at_time(self, time:int) -> str:
+    def get_cause_at_time(self, time: int) -> str:
         """When tracing is enabled this function will written a string representation of the control packet
         processed at time `time`"""
         if self.tracer is not None:
@@ -162,7 +162,8 @@ class SimulationSetup(object):
             raise Exception("Tracing was not enabled")
 
     def check_algorithm(self) -> bool:
-        """This is a simple function to test whether, at the end of simulation, the algorithm behaved correctly"""
+        """This is a simple function to test whether, at the end of simulation, the algorithm behaved correctly, i.e.,
+        all connectivity loops were eliminated and the graph remained connected."""
         final_graph = self.holder.create_nx_graph()
         p = False
         cycle = None
@@ -170,7 +171,7 @@ class SimulationSetup(object):
             cycle = nx.algorithms.cycles.find_cycle(final_graph)
             return False
         except nx.exception.NetworkXNoCycle:
-            return True
+            return nx.is_connected(final_graph)
 
     def send_host_ping(self, host: str, ttl: int = 32) -> None:
         """Sends a ping from a single host"""
