@@ -53,38 +53,33 @@ def from_packet(pkt: Packet) -> Any:
 
 
 class PortState(Enum):
-    """Whether a port is up or down. This means when you have a SwitchRep object `sw`
-    you can check whether port with ID p (an integer) is up by checking if  
-    `sw.port_state(p) == PortState.Up`."""
+    """Enumeration that indicates whether a port is Up or Down. All PortStates
+    are reported using this enumeration"""
 
     Up = 1  #: Port is UP (i.e., packets can flow through the port)
     Down = 2  #: Port is DOWN (i.e., no packets can flow through the port)
 
 
 class ControlPlane(object):
-    """A control plane object is user code that decides what happens when a control
-    packet is received."""
+    """An abstract class that users extend to receive control signals from the data plane.."""
 
     def __init__(self) -> None:
         pass
 
     def initialize(self, switch: SwitchRep) -> None:
-        """Indicates that a switch is all connected up allowing user code to initialize
-        itself. It is very important that at this point user code should generate some
-        control packets, since in the absence of control packets we will never invoke
-        the control plane again.
-        switch in this case can be used to set ports up or down or to send control
-        packets."""
+        """Called when the switch being controlled is connected and ready to forward. It is
+        required that at least one switch in the network generate a control packet in this
+        method, since otherwise the ControlPlane object will never regain control."""
         raise NotImplementedError
 
     def process_control_packet(self, switch: SwitchRep, port_id, data: Any) -> None:
-        """Called whenever a control packet is received
-         Your options are
+        """Called when the switch receives a control packet. When called user code has a
+        few options:
             - Do nothing
             - Set a port up by calling sw.port_up(id)
             - Set a port down by calling sw.port_down(id)
             - Send packets (sw.send_control as above)
-            -  Do some computation.
+            - Update internal state.
         """
         raise NotImplementedError
 
@@ -156,6 +151,10 @@ class SwitchRep(object):
     def port_status(self, port_id: int):
         """Get status for port `port_id`"""
         return self.port_state[port_id]
+
+    def port_count(self) -> int:
+        """Get the number of ports in this switch"""
+        return len(self.port_state)
 
 
 class DumbSwitch(NetNode):

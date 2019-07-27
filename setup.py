@@ -6,10 +6,10 @@ with open("README.md", "r") as f:
 
 setup(
     name="plab1_simulation",
-    version='0.1',
+    version="0.1",
     author="Aurojit Panda",
     author_email="apanada@cs.nyu.edu.edu",
     packages=find_packages(),
-    install_requires=['networkx', 'pyyaml', 'matplotlib'],
+    install_requires=["networkx", "pyyaml", "matplotlib"],
     license="CRAPL",
 )
