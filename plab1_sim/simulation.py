@@ -185,8 +185,7 @@ class SimulationSetup(object):
     def from_yml_string(
         s: str, enable_trace: bool, control: Callable[[], components.ControlPlane]
     ) -> SimulationSetup:
-        """This is a helper function that can be used to construct a simulation from a
-        topology yml file"""
+        """This is a helper function that constructs a simulation from a topology yml file"""
         obj = yaml.safe_load(s)
         obj["edges"] = map(tuple, obj["edges"])
         obj["enable_trace"] = enable_trace

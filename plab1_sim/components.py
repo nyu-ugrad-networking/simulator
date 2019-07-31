@@ -27,7 +27,7 @@ class PacketType(Enum):
 
 
 class Packet(object):
-    """ A packet object"""
+    """A packet object"""
 
     def __init__(self, type: PacketType, ttl: int, data: Any) -> None:
         self.type = type
@@ -36,7 +36,7 @@ class Packet(object):
 
 
 def to_control_packet(data: Any) -> Packet:
-    """ Construct a control packet from an arbitrary variable"""
+    """Construct a control packet from an arbitrary variable"""
     # We do not check TTL on control packets, since
     # they do not propagate.
     return Packet(PacketType.Control, 0, data)
