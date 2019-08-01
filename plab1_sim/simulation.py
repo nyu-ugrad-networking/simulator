@@ -58,7 +58,7 @@ class SimulationSetup(object):
 
     def __init__(
         self,
-        hosts: List[str],
+        hosts: Dict[str, components.Address],
         switches: List[str],
         nifaces: int,
         edges: List[Tuple[str, str]],
@@ -77,17 +77,19 @@ class SimulationSetup(object):
         else:
             self.tracer = None
         self.holder = components.SimObjectHolder()
-        self.switches = []  # type: List[components.DumbSwitch]
+        self.switches = []  # type: List[components.ForwardingSwitch]
         self.nodes = {}  # type: Dict[str, components.NetNode]
+        self.hosts = [] # type: List[components.Host]
         for switch in switches:
-            sw = components.DumbSwitch(switch, nifaces, control(), self.tracer)
+            sw = components.ForwardingSwitch(switch, nifaces, control(), self.tracer)
             self.nodes[switch] = sw
             self.switches.append(sw)
             self.holder.add_net_object(sw)
-        for host in hosts:
-            ho = components.Host(host, self.tracer)
-            self.nodes[host] = ho
+        for host_id, addr in hosts.items():
+            ho = components.Host(host_id, addr, self.tracer)
+            self.nodes[host_id] = ho
             self.holder.add_net_object(ho)
+            self.hosts.append(ho)
         connected_iface_counts = defaultdict(lambda: 0)  # type: Dict[str, int]
         self.links = []  # type: List[components.Link]
         for (a, b) in edges:
@@ -102,7 +104,12 @@ class SimulationSetup(object):
 
             self.links.append(link)
         for sw in self.switches:
+            # Initialize the switches
             sw.initialized()
+        for ho in self.hosts:
+            # Once switches are initialized send host ID messages to inform
+            # switches of host connectivity.
+            ho.send_host_identification()
 
     def run(self):
         """Run the scheduling loop to completion"""
@@ -175,11 +182,12 @@ class SimulationSetup(object):
 
     def send_host_ping(self, host: str, ttl: int = 32) -> None:
         """Sends a ping from a single host"""
-        h = self.nodes[host]
-        if isinstance(h, components.Host):
-            h.send(components.to_data_packet("ping", ttl))
-        else:
-            raise Exception("%s is not a host" % host)
+        raise NotImplementedError
+        # h = self.nodes[host]
+        # if isinstance(h, components.Host):
+        # h.send(components.to_data_packet("ping", ttl))
+        # else:
+        # raise Exception("%s is not a host" % host)
 
     @staticmethod
     def from_yml_string(

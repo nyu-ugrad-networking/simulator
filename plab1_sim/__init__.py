@@ -8,4 +8,6 @@ __all__ = [
     "SimObjectHolder",
     "Tracer",
     "SimulationSetup",
+    "HostIdentification",
+    "Address"
 ]

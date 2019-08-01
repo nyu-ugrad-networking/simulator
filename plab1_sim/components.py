@@ -35,6 +35,28 @@ class Packet(object):
         self.ttl = ttl
 
 
+Address = int  #: Addresses are represented as integers here.
+BroadcastAddress = (
+    0xFFFFFFFF
+)  # type: Address #: Represents a packet designed to be broadcast
+
+
+class AddressablePacket(Packet):
+    """A packet object with source and destination addresses"""
+
+    def __init__(
+        self,
+        source: Address,
+        destination: Address,
+        type: PacketType,
+        ttl: int,
+        data: Any,
+    ) -> None:
+        super().__init__(type, ttl, data)
+        self.source = source
+        self.destination = destination
+
+
 def to_control_packet(data: Any) -> Packet:
     """Construct a control packet from an arbitrary variable"""
     # We do not check TTL on control packets, since
@@ -42,9 +64,11 @@ def to_control_packet(data: Any) -> Packet:
     return Packet(PacketType.Control, 0, data)
 
 
-def to_data_packet(data: Any, ttl: int = 32) -> Packet:
+def to_data_packet(
+    source: Address, destination: Address, data: Any, ttl: int = 32
+) -> AddressablePacket:
     """Construct a data packet from an arbitrary variable"""
-    return Packet(PacketType.Data, ttl, data)
+    return AddressablePacket(source, destination, PacketType.Data, ttl, data)
 
 
 def from_packet(pkt: Packet) -> Any:
@@ -61,6 +85,13 @@ class InterfaceState(Enum):
     Down = (
         2
     )  #: Interface is DOWN, i.e. data packets **will not** be send and received on the interface.
+
+
+class LinkState(Enum):
+    """Enumeration that indicates whether a link is usable or not."""
+
+    Up = 1  #: Link is UP (i.e., can forward packets)
+    Down = 2  #: Link is DOWN (i.e., link cannot forward packet)
 
 
 class ControlPlane(object):
@@ -89,6 +120,14 @@ class ControlPlane(object):
         """
         raise NotImplementedError
 
+    def process_link_up(self, switch: SwitchRep, port_id: int) -> None:
+        """Called when the link connected to port `port_id` recovers and thus becomes available."""
+        raise NotImplementedError
+
+    def process_link_down(self, switch: SwitchRep, port_id: int) -> None:
+        """Called when the link connected to port `port_id` fails and thus becomes unavailable."""
+        raise NotImplementedError
+
 
 class NetNode(object):
     """Represents a network node: a host or a switch."""
@@ -105,21 +144,52 @@ class NetNode(object):
     def get_ifaces(self) -> List[Interface]:
         raise NotImplementedError
 
+    def notify_link_up(self, port_id: int) -> None:
+        raise NotImplementedError
+
+    def notify_link_down(self, port_id: int) -> None:
+        raise NotImplementedError
+
+class HostIdentification(object):
+    """A message sent by hosts when first initialized. This message allows switches to discover
+    the set of hosts they are connected to and construct forwarding entries for hosts to which
+    they are directly connected."""
+    def __init__(self, host_id: str, address: Address) -> None:
+        self._sender_id = host_id
+        self._sender_address = address
+
+    @property
+    def sender_id(self) -> str:
+        """ The ID of the host that sent this ID information"""
+        return self._sender_id
+
+    @property
+    def address(self) -> Address:
+        """The sender's address"""
+        return self._sender_address
 
 class Host(NetNode):
     """ A host"""
 
-    def __init__(self, id: str, tracer: Optional[Tracer] = None) -> None:
+    def __init__(self, id: str, address: Address, tracer: Optional[Tracer] = None) -> None:
         self.id = id
         self.iface = Interface(0, id, self)
         if tracer:
             tracer.add_node(self)
+        self.address = address
 
     def recv(self, iface_id: int, packet: Packet) -> None:
         if packet.type == PacketType.Data:
-            print("%s: host received packet %s" % (self.id, from_packet(packet)))
+            if isinstance(packet, AddressablePacket):
+                if packet.destination != self.address:
+                    warnings.warn("Host %s received a packet not destined for it"%self.id)
+                else:
+                    print("%s: host received packet %s" % (self.id, from_packet(packet)))
+            else:
+                warnings.warn("%s: host received a non-addressed packet %s"%(self.id, from_packet(packet)))
 
-    def send(self, packet: Packet) -> None:
+    def send(self, packet: AddressablePacket) -> None:
+        packet.source = self.address
         print("%s: host sent packet %s" % (self.id, from_packet(packet)))
         self.iface.send(packet)
 
@@ -129,13 +199,26 @@ class Host(NetNode):
     def get_ifaces(self) -> List[Interface]:
         return [self.iface]
 
+    def get_address(self) -> Address:
+        return self.address
+
+    def send_host_identification(self) -> None:
+        packet = to_control_packet(HostIdentification(self.id, self.address))
+        self.port.send(packet)
+
+    def notify_link_up(self, port_id: int) -> None:
+        return  # Nothing to really do here, hosts are not handling this.
+
+    def notify_link_down(self, port_id: int) -> None:
+        return  # Nothing to really do here.
+
 
 class SwitchRep(object):
     """SwitchRep is a switch abstraction supplied to the control code. It allows
     the control code to send control messages, set interfaces up and down, and query
     for interface state."""
 
-    def __init__(self, sw: DumbSwitch):
+    def __init__(self, sw: ForwardingSwitch):
         self._id = sw.id
         self.iface_state = [p.state for p in sw.ifaces]
         self._sw = sw
@@ -168,8 +251,21 @@ class SwitchRep(object):
         """Get the number of interfacess in this switch"""
         return len(self.iface_state)
 
+    def update_forwarding_table(self, address: Address, port: int) -> None:
+        """Update forwarding table so packets destined to `address` will
+        be forwarded out `port`"""
+        self._sw.update_forwarding_table(address, port)
 
-class DumbSwitch(NetNode):
+    def get_forwarding_for_address(self, address: Address) -> int:
+        """Retrieve how packets destined to `address` are forwarded"""
+        return self._sw.get_forwarding_for_address(address)
+
+    def get_known_addresses(self) -> List[Address]:
+        """Get all addresses that this switch can forward"""
+        return self._sw.get_known_addresses()
+
+
+class ForwardingSwitch(NetNode):
     def __init__(
         self,
         id: str,
@@ -185,6 +281,7 @@ class DumbSwitch(NetNode):
         if self.tracer:
             self.tracer.add_node(self)
         self.is_initialized = False
+        self.forwarding_table = {}  # type: Dict[Address, int]
 
     def get_id(self) -> str:
         return self.id
@@ -204,23 +301,54 @@ class DumbSwitch(NetNode):
             self.tracer.set_iface_down(self.ifaces[iface_id])
         return self.ifaces[iface_id].set_down()
 
+    def update_forwarding_table(self, address: Address, port: int) -> None:
+        self.forwarding_table[address] = port
+
+    def get_forwarding_for_address(self, address: Address) -> int:
+        return self.forwarding_table[address]
+
+    def get_known_addresses(self) -> List[Address]:
+        return list(self.forwarding_table.keys())
+
     def initialized(self) -> None:
         self.is_initialized = True
         self.control.initialize(self.rep)
 
     def recv(self, iface_id: int, packet: Packet) -> None:
-        if packet.type == PacketType.Data:
-            if self.ifaces[iface_id].state == InterfaceState.Down:
-                return
-            if packet.ttl == 0:
-                warnings.warn("Dropping packet because TTL exceeded")
-                return
-            print("%s: forwarding data packet (%d)" % (self.id, packet.ttl))
-            for idx, p in enumerate(self.ifaces):
-                if idx != iface_id and p.state == InterfaceState.Up:
+        def broadcast():
+            for idx, p in enumerate(self.ports):
+                if (idx != port_id and
+                    self.ifaces[iface_id].state == InterfaceState.Up):
                     pkt = copy.deepcopy(packet)
                     pkt.ttl -= 1
                     p.send(pkt)
+
+        if packet.type == PacketType.Data:
+            if packet.ttl == 0:
+                warnings.warn("Dropping packet because TTL exceeded")
+                return
+            if self.ifaces[iface_id].state != InterfaceState.Up:
+                return
+            if isinstance(packet, AddressablePacket):
+                if packet.destination in self.forwarding_table:
+                    out_port = self.forwarding_table[packet.destination]
+                    if out_port == port_id:
+                        warnings.warn(
+                            "Switch %s is forwarding packet to destination %d out the port it was received"
+                            % (self.id, packet.destination)
+                        )
+                    if self.ifaces[out_port].state != InterfaceState.Up:
+                        warnings.warn(
+                            "Switch %s dropping packet out disabled interface"%(self.id))
+                        return
+                    # Do not need to deepcopy here since only one copy :)
+                    packet.ttl -= 1
+                    self.ports[out_port].send(packet)
+                elif packet.destination == BroadcastAddress:
+                    broadcast()
+            else:
+                warnings.warn("Received a DATA packet without an address")
+                broadcast()
         elif packet.type == PacketType.Control:
             data = from_packet(packet)
             if self.tracer:
@@ -230,6 +358,12 @@ class DumbSwitch(NetNode):
 
     def send(self, iface_id: int, packet: Packet) -> None:
         self.ifaces[iface_id].send(packet)
+
+    def notify_link_up(self, port_id: int) -> None:
+        self.control.process_link_up(self.rep, port_id)
+
+    def notify_link_down(self, port_id: int) -> None:
+        self.control.process_link_down(self.rep, port_id)
 
 
 class Interface(object):
@@ -264,6 +398,15 @@ class Interface(object):
     def recv(self, packet: Packet):
         self.swtch.recv(self.id, packet)
 
+    def __str__(self):
+        return "(self.sw_id, self.id)"
+
+    def notify_link_up(self) -> None:
+        self.swtch.notify_link_up(self.id)
+
+    def notify_link_down(self) -> None:
+        self.swtch.notify_link_down(self.id)
+
 
 class Link(object):
     _Count = 0
@@ -280,6 +423,7 @@ class Link(object):
         self.uniq = Link._Count
         Link._Count += 1
         self.tracer = tracer
+        self.state = LinkState.Up
 
     def connect(self, iface: Interface) -> None:
         if self.connects[0] is None:
@@ -306,6 +450,38 @@ class Link(object):
             self.sched.schedule(lambda: p.recv(packet))
         else:
             raise (BadSender(self.id, iface))
+
+    def set_link_up(self) -> None:
+        if self.state == LinkState.Down:
+            self.state = LinkState.Up
+            if (
+                self.tracer is not None
+                and self.connects[0] is not None
+                and self.connects[1] is not None
+            ):
+                self.tracer.process_control_event(
+                    "Link %s--%s UP" % (str(self.connects[0]), str(self.connects[1]))
+                )
+            if self.connects[0] is not None:
+                self.connects[0].notify_link_up()
+            if self.connects[1] is not None:
+                self.connects[1].notify_link_up()
+
+    def set_link_down(self) -> None:
+        if self.state == LinkState.Up:
+            self.state = LinkState.Down
+            if (
+                self.tracer is not None
+                and self.connects[0] is not None
+                and self.connects[1] is not None
+            ):
+                self.tracer.process_control_event(
+                    "Link %s--%s DOWN" % (str(self.connects[0]), str(self.connects[1]))
+                )
+            if self.connects[0] is not None:
+                self.connects[0].notify_link_down()
+            if self.connects[1] is not None:
+                self.connects[1].notify_link_down()
 
 
 class TooManyConnections(Exception):
