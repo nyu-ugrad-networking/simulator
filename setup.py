@@ -5,7 +5,7 @@ with open("README.md", "r") as f:
     long_description = f.read()
 
 setup(
-    name="plab1_simulation",
+    name="plab2_simulation",
     version="0.2",
     author="Aurojit Panda",
     author_email="apanada@cs.nyu.edu.edu",
