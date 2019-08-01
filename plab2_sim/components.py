@@ -256,8 +256,9 @@ class SwitchRep(object):
         be forwarded out `port`"""
         self._sw.update_forwarding_table(address, port)
 
-    def get_forwarding_for_address(self, address: Address) -> int:
-        """Retrieve how packets destined to `address` are forwarded"""
+    def get_forwarding_for_address(self, address: Address) -> Optional[int]:
+        """Retrieve how packets destined to `address` are forwarded. In case
+        the address is unknown this function returns None."""
         return self._sw.get_forwarding_for_address(address)
 
     def get_known_addresses(self) -> List[Address]:
@@ -304,8 +305,8 @@ class ForwardingSwitch(NetNode):
     def update_forwarding_table(self, address: Address, port: int) -> None:
         self.forwarding_table[address] = port
 
-    def get_forwarding_for_address(self, address: Address) -> int:
-        return self.forwarding_table[address]
+    def get_forwarding_for_address(self, address: Address) -> Optional[int]:
+        return self.forwarding_table.get(address, None)
 
     def get_known_addresses(self) -> List[Address]:
         return list(self.forwarding_table.keys())
@@ -399,7 +400,7 @@ class Interface(object):
         self.swtch.recv(self.id, packet)
 
     def __str__(self):
-        return "(self.sw_id, self.id)"
+        return "(%s, %d)"%(self.sw_id, self.id)
 
     def notify_link_up(self) -> None:
         self.swtch.notify_link_up(self.id)
