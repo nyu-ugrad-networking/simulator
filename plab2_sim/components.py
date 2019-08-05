@@ -1,6 +1,6 @@
 from __future__ import annotations
 from enum import Enum
-from typing import List, Any, Tuple, Optional, Callable, Deque, Dict
+from typing import List, Any, Tuple, Optional, Callable, Deque, Dict, Iterator, Set
 import pickle
 import copy
 from collections import defaultdict
@@ -150,10 +150,15 @@ class NetNode(object):
     def notify_link_down(self, port_id: int) -> None:
         raise NotImplementedError
 
+    def how_forward(self, a: Address) -> Optional[int]:
+        raise NotImplementedError
+
+
 class HostIdentification(object):
     """A message sent by hosts when first initialized. This message allows switches to discover
     the set of hosts they are connected to and construct forwarding entries for hosts to which
     they are directly connected."""
+
     def __init__(self, host_id: str, address: Address) -> None:
         self._sender_id = host_id
         self._sender_address = address
@@ -168,10 +173,13 @@ class HostIdentification(object):
         """The sender's address"""
         return self._sender_address
 
+
 class Host(NetNode):
     """ A host"""
 
-    def __init__(self, id: str, address: Address, tracer: Optional[Tracer] = None) -> None:
+    def __init__(
+        self, id: str, address: Address, tracer: Optional[Tracer] = None
+    ) -> None:
         self.id = id
         self.iface = Interface(0, id, self)
         if tracer:
@@ -182,11 +190,18 @@ class Host(NetNode):
         if packet.type == PacketType.Data:
             if isinstance(packet, AddressablePacket):
                 if packet.destination != self.address:
-                    warnings.warn("Host %s received a packet not destined for it"%self.id)
+                    warnings.warn(
+                        "Host %s received a packet not destined for it" % self.id
+                    )
                 else:
-                    print("%s: host received packet %s" % (self.id, from_packet(packet)))
+                    print(
+                        "%s: host received packet %s" % (self.id, from_packet(packet))
+                    )
             else:
-                warnings.warn("%s: host received a non-addressed packet %s"%(self.id, from_packet(packet)))
+                warnings.warn(
+                    "%s: host received a non-addressed packet %s"
+                    % (self.id, from_packet(packet))
+                )
 
     def send(self, packet: AddressablePacket) -> None:
         packet.source = self.address
@@ -211,6 +226,9 @@ class Host(NetNode):
 
     def notify_link_down(self, port_id: int) -> None:
         return  # Nothing to really do here.
+
+    def how_forward(self, a: Address) -> Optional[int]:
+        return None
 
 
 class SwitchRep(object):
@@ -304,6 +322,8 @@ class ForwardingSwitch(NetNode):
 
     def update_forwarding_table(self, address: Address, port: int) -> None:
         self.forwarding_table[address] = port
+        if self.tracer:
+            self.tracer.update_forwarding_table(self.id, address, port)
 
     def get_forwarding_for_address(self, address: Address) -> Optional[int]:
         return self.forwarding_table.get(address, None)
@@ -366,6 +386,9 @@ class ForwardingSwitch(NetNode):
     def notify_link_down(self, port_id: int) -> None:
         self.control.process_link_down(self.rep, port_id)
 
+    def how_forward(self, a: Address) -> Optional[int]:
+        return self.forwarding_table.get(a, None)
+
 
 class Interface(object):
     def __init__(self, id: int, sw_id: str, swtch: NetNode) -> None:
@@ -400,7 +423,7 @@ class Interface(object):
         self.swtch.recv(self.id, packet)
 
     def __str__(self):
-        return "(%s, %d)"%(self.sw_id, self.id)
+        return "(%s, %d)" % (self.sw_id, self.id)
 
     def notify_link_up(self) -> None:
         self.swtch.notify_link_up(self.id)
@@ -441,6 +464,14 @@ class Link(object):
             self.tracer.add_link(
                 self.uniq, self.connects[0].sw_id, self.connects[1].sw_id
             )
+
+    def get_other_end(self, port: Port) -> Optional[Port]:
+        if port is self.connects[0]:
+            return self.connects[1]
+        elif port is self.connects[1]:
+            return self.connects[0]
+        else:
+            raise (BadSender(self.id, port))
 
     def send(self, iface: Interface, packet: Packet) -> None:
         if iface is self.connects[0] and self.connects[1] is not None:
@@ -508,6 +539,9 @@ class Tracer(object):
         self.graph = nx.MultiGraph()
         self.color = [defaultdict(lambda: "black")]  # type: List[Dict[int, str]]
         self.time = 0
+        self.forwarding_tables = [
+            defaultdict(lambda: {})
+        ]  # type: List[Dict[str, Dict[Address, int]]]
 
     def add_node(self, ob: NetNode) -> None:
         self.nodes.append(ob)
@@ -518,8 +552,12 @@ class Tracer(object):
 
     def process_control_event(self, cause: str) -> None:
         self.color.append(self.color[-1].copy())
+        self.forwarding_tables.append(self.forwarding_tables[-1].copy())
         self.cause.append(cause)
         self.time += 1
+
+    def update_forwarding_table(self, switch_id: str, address: Address, port: int):
+        self.forwarding_tables[self.time][switch_id][address] = port
 
     def set_iface_down(self, iface: Interface) -> None:
         if iface.link is not None:
@@ -582,56 +620,163 @@ class SimObjectHolder(object):
 
     def __init__(self):
         self.net_objects = []  # type: List[NetNode]
+        self.hosts = []  # type: List[Host]
+        self.host_map = {}  # type: Dict[str, Host]
 
     def add_net_object(self, ob: NetNode):
         self.net_objects.append(ob)
+        if isinstance(ob, Host):
+            self.hosts.append(ob)
+            self.host_map[ob.get_id()] = ob
 
-    def identify_links(self):
-        all_links = {}
-        link_state = defaultdict(lambda: InterfaceState.Up)
-        waiting = {}
-        for ob in self.net_objects:
-            id = ob.get_id()
-            for iface in ob.get_ifaces():
-                if not iface.link:
-                    continue
-                if iface.link.uniq in waiting:
-                    all_links[iface.link.uniq] = (id, waiting[iface.link.uniq])
-                    del waiting[iface.link.uniq]
-                else:
-                    waiting[iface.link.uniq] = id
-                if iface.state == InterfaceState.Down:
-                    link_state[iface.link.uniq] = InterfaceState.Down
-        for k in sorted(all_links):
+    def get_all_addresses(self) -> Iterator[Address]:
+        return map(lambda o: o.get_address(), self.hosts)
 
-            print(
-                "%s---%s (%s)" % (all_links[k][0], all_links[k][1], str(link_state[k]))
+    def get_address_map(self) -> Dict[str, Address]:
+        return dict(map(lambda o: (o.get_id(), o.get_address()), self.hosts))
+
+    def get_forwarding_graph_for_host(self, host: str) -> nx.MultiGraph:
+        g = nx.MultiDiGraph()
+        g.add_nodes_from(map(lambda o: o.get_id(), self.net_objects))
+        addresses = self.get_all_addresses()
+        h_obj = self.host_map[host]
+        h_address = h_obj.get_address()
+        h_port = h_obj.get_ports()[0]
+        if h_port.state == PortState.Down or not h_port.link:
+            # Nothing is connected
+            return g
+        h_link = h_port.link
+        h_other_port = h_link.get_other_end(h_port)
+        if not h_other_port:
+            return g
+        first_hop = h_other_port.swtch
+        if not isinstance(first_hop, ForwardingSwitch):
+            raise Exception(
+                "Topology with host connected to something other than a forwarding switch"
             )
 
-    def create_nx_graph(self) -> nx.MultiGraph:
-        """Return the final connectivity graph for this simulation"""
-        g = nx.MultiGraph()
-        g.add_nodes_from(map(lambda o: o.get_id(), self.net_objects))
-        all_links = {}
-        link_state = defaultdict(
-            lambda: InterfaceState.Up
-        )  # type: Dict[int, InterfaceState]
-        waiting = {}  # type: Dict[int, str]
-        for ob in self.net_objects:
-            id = ob.get_id()
-            for iface in ob.get_ifaces():
-                if not iface.link:
-                    continue
-                if iface.link.uniq in waiting:
-                    all_links[iface.link.uniq] = (id, waiting[iface.link.uniq])
-                    del waiting[iface.link.uniq]
-                else:
-                    waiting[iface.link.uniq] = id
-                if iface.state == InterfaceState.Down:
-                    link_state[iface.link.uniq] = InterfaceState.Down
-        for k in sorted(all_links):
-            if link_state[k] == InterfaceState.Up:
-                g.add_edge(
-                    all_links[k][0], all_links[k][1], color="black", style="solid"
-                )
+        def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
+            o_p = c.how_forward(a)
+            if o_p:
+                o = c.get_ports()[o_p]
+                if o.link:
+                    e = o.link.get_other_end(o)
+                    if e:
+                        return e.swtch
+            return None
+
+        for a in addresses:
+            g.add_edge(h_obj.get_id(), first_hop.get_id(), address=a)
+            c = first_hop  # type: NetNode
+            n = get_next_hop(a, first_hop)
+            while n:
+                g.add_edge(c.get_id(), n.get_id(), address=a)
+                c = n
+                n = get_next_hop(a, c)
         return g
+
+    def get_connectivity_matrix(self) -> Dict[str, Dict[Address, str]]:
+        def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
+            o_p = c.how_forward(a)
+            if o_p:
+                o = c.get_ports()[o_p]
+                if o.link:
+                    e = o.link.get_other_end(o)
+                    if e:
+                        return e.swtch
+            return None
+
+        def get_first_hop(h: Host) -> Optional[NetNode]:
+            h_port = h.get_ports()[0]
+            if h_port.state == PortState.Down or not h_port.link:
+                # Nothing is connected
+                return None
+            h_link = h_port.link
+            h_other_port = h_link.get_other_end(h_port)
+            if not h_other_port:
+                return None
+            return h_other_port.swtch
+
+        def get_other_end(s: NetNode, a: Address) -> NetNode:
+            c = s
+            n = get_next_hop(a, c)
+            visited = set()  # type: Set[str]
+            while n is not None:
+                if n.get_id() in visited:
+                    # We found a loop, so just terminate
+                    # here.
+                    return c
+                visited.add(n.get_id())
+                c = n
+                n = get_next_hop(a, c)
+            return c
+
+        addresses = list(self.get_all_addresses())
+        output = {}  # type: Dict[str, Dict[Address, str]]
+        for h in self.hosts:
+            fh = get_first_hop(h)
+            id = h.get_id()
+            output[id] = {}
+            for address in addresses:
+                if fh is not None:
+                    oe = get_other_end(fh, address)
+                    output[id][address] = oe.get_id()
+        return output
+
+    def check_loop_freedom(self) -> bool:
+        """Check if forwarding is loop free. If so we return True, else
+        return False"""
+
+        def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
+            o_p = c.how_forward(a)
+            if o_p:
+                o = c.get_ports()[o_p]
+                if o.link:
+                    e = o.link.get_other_end(o)
+                    if e:
+                        return e.swtch
+            return None
+
+        def get_first_hop(h: Host) -> Optional[NetNode]:
+            h_port = h.get_ports()[0]
+            if h_port.state == PortState.Down or not h_port.link:
+                # Nothing is connected
+                return None
+            h_link = h_port.link
+            h_other_port = h_link.get_other_end(h_port)
+            if not h_other_port:
+                return None
+            return h_other_port.swtch
+
+        def is_loopy_forward(s: NetNode, a: Address) -> bool:
+            c = s
+            n = get_next_hop(a, c)
+            visited = set()  # type: Set[str]
+            while n is not None:
+                if n.get_id() in visited:
+                    # We found a loop, so just terminate
+                    # here.
+                    return True
+                visited.add(n.get_id())
+                c = n
+                n = get_next_hop(a, c)
+            return False
+
+        addresses = list(self.get_all_addresses())
+        for h in self.hosts:
+            fh = get_first_hop(h)
+            for address in addresses:
+                if fh is not None:
+                    if is_loopy_forward(fh, address):
+                        return False  # We found a loop
+        return True
+
+    def check_complete(self) -> bool:
+        """Check that all hosts are connected to each other"""
+        cmatrix = self.get_connectivity_matrix()
+        address_map = self.get_address_map()
+        for (h, a) in address_map.items():
+            for x, c in cmatrix.items():
+                if a not in c or c[a] != h:
+                    return False  # We found a disturbing lack of completeness
+        return True

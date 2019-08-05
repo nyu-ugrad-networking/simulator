@@ -79,7 +79,7 @@ class SimulationSetup(object):
         self.holder = components.SimObjectHolder()
         self.switches = []  # type: List[components.ForwardingSwitch]
         self.nodes = {}  # type: Dict[str, components.NetNode]
-        self.hosts = [] # type: List[components.Host]
+        self.hosts = []  # type: List[components.Host]
         for switch in switches:
             sw = components.ForwardingSwitch(switch, nifaces, control(), self.tracer)
             self.nodes[switch] = sw
@@ -171,23 +171,20 @@ class SimulationSetup(object):
     def check_algorithm(self) -> bool:
         """This is a simple function to test whether, at the end of simulation, the algorithm behaved correctly, i.e.,
         all connectivity loops were eliminated and the graph remained connected."""
-        final_graph = self.holder.create_nx_graph()
-        p = False
-        cycle = None
-        try:
-            cycle = nx.algorithms.cycles.find_cycle(final_graph)
-            return False
-        except nx.exception.NetworkXNoCycle:
-            return nx.is_connected(final_graph)
+        return self.holder.check_loop_freedom() and self.holder.check_complete()
 
-    def send_host_ping(self, host: str, ttl: int = 32) -> None:
-        """Sends a ping from a single host"""
-        raise NotImplementedError
-        # h = self.nodes[host]
-        # if isinstance(h, components.Host):
-        # h.send(components.to_data_packet("ping", ttl))
-        # else:
-        # raise Exception("%s is not a host" % host)
+    def send_host_ping(self, src_host: str, dest_host: str, ttl: int = 32) -> None:
+        """Sends a ping from `src_host` to `dest_host`"""
+        s = self.nodes[src_host]
+        d = self.nodes[dest_host]
+        if isinstance(d, components.Host):
+            d_a = d.get_address()
+        else:
+            raise Exception("%s is not a host" % dest_host)
+        if isinstance(s, components.Host):
+            s.send(components.to_data_packet(s.get_address(), d_a, "ping", ttl))
+        else:
+            raise Exception("%s is not a host" % src_host)
 
     @staticmethod
     def from_yml_string(
