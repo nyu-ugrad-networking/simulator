@@ -714,6 +714,58 @@ class SimObjectHolder(object):
                     output[id][address] = oe.get_id()
         return output
 
+    def get_paths(self) -> Dict[str, Dict[Address, List[str]]]:
+        """Get the paths from any host given an address"""
+
+        def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
+            o_p = c.how_forward(a)
+            if o_p and o_p:
+                o = c.get_ports()[o_p]
+                if o.link and o.state == PortState.Up:
+                    e = o.link.get_other_end(o)
+                    if e and e.state == PortState.Up:
+                        return e.swtch
+            return None
+
+        def get_first_hop(h: Host) -> Optional[NetNode]:
+            h_port = h.get_ports()[0]
+            if h_port.state == PortState.Down or not h_port.link:
+                # Nothing is connected
+                return None
+            h_link = h_port.link
+            h_other_port = h_link.get_other_end(h_port)
+            if not h_other_port or h_other_port.state != PortState.Up:
+                return None
+            return h_other_port.swtch
+
+        def explore_path(s: NetNode, a: Address) -> List[str]:
+            c = s
+            n = get_next_hop(a, c)
+            visited = set()  # type: Set[str]
+            path = [c.get_id()]
+            while n is not None:
+                path.append(n.get_id())
+                if n.get_id() in visited:
+                    # We found a loop, so just terminate
+                    # here.
+                    return path
+                visited.add(n.get_id())
+                c = n
+                n = get_next_hop(a, c)
+            return path
+
+        addresses = list(self.get_all_addresses())
+        output = {}  # type: Dict[str, Dict[Address, List[str]]]
+        for h in self.hosts:
+            fh = get_first_hop(h)
+            id = h.get_id()
+            output[id] = {}
+            for address in addresses:
+                if fh is not None:
+                    oe = explore_path(fh, address)
+                    output[id][address] = oe
+        return output
+
     def get_distance_matrix(self) -> Dict[str, Dict[Address, int]]:
         """Get number of hops a packet sent by a node is forwarded before
         delivery. We return -1 for cases where a loop is encountered"""
@@ -761,6 +813,7 @@ class SimObjectHolder(object):
         for h in self.hosts:
             fh = get_first_hop(h)
             id = h.get_id()
+            output[id] = {}
             for address in addresses:
                 if fh is not None:
                     output[id][address] = get_distance(fh, address)
