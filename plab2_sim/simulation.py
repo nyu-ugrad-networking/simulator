@@ -5,6 +5,7 @@ from collections import defaultdict, deque
 import yaml
 import warnings
 import networkx as nx  # type: ignore
+import pprint
 
 
 class SimpleScheduler(components.Scheduler):
@@ -50,6 +51,13 @@ class SimpleScheduler(components.Scheduler):
         """Return the total number of events executed"""
         return self.events_executed
 
+    def has_exhausted_limit(self) -> bool:
+        """Check whether more events can be executed"""
+        return self.events_executed < self.event_limit
+
+    def reset_execution_steps(self) -> None:
+        self.events_executed = 0
+
 
 class SimulationSetup(object):
     """SimulationSetup objects represent a network simulation environment. They are
@@ -66,6 +74,7 @@ class SimulationSetup(object):
         control: Callable[[], components.ControlPlane],
         simulataneous_events: int = 1024,
         total_event_budget: int = 10000,
+        failure_events=[],
     ):
         """We do not recommend directly calling this function, and instead recommend calling
         the static initializers"""
@@ -80,6 +89,7 @@ class SimulationSetup(object):
         self.switches = []  # type: List[components.ForwardingSwitch]
         self.nodes = {}  # type: Dict[str, components.NetNode]
         self.hosts = []  # type: List[components.Host]
+        self.failure_events = deque(failure_events)  # type: Deque[Tuple[str, str]]
         for switch in switches:
             sw = components.ForwardingSwitch(switch, nifaces, control(), self.tracer)
             self.nodes[switch] = sw
@@ -92,7 +102,7 @@ class SimulationSetup(object):
             self.hosts.append(ho)
         connected_iface_counts = defaultdict(lambda: 0)  # type: Dict[str, int]
         self.links = []  # type: List[components.Link]
-        for (a, b) in edges:
+        for (a, b, lid) in edges:
             link = components.Link("%s--%s" % (a, b), self.scheduler, self.tracer)
             iface_idx_a = connected_iface_counts[a]
             connected_iface_counts[a] += 1
@@ -102,7 +112,7 @@ class SimulationSetup(object):
             connected_iface_counts[b] += 1
             self.nodes[b].get_ifaces()[iface_idx_b].attach(link)
 
-            self.links.append(link)
+            self.links[lid] = link
         for sw in self.switches:
             # Initialize the switches
             sw.initialized()
@@ -115,9 +125,21 @@ class SimulationSetup(object):
         """Run the scheduling loop to completion"""
         self.scheduler.run()
         if self.scheduler.execution_steps() == 0:
-            warnings.warn(
-                "No simulation steps executed. Did you send packets during initialization?"
-            )
+            warnings.warn("No simulation steps executed.")
+        while len(self.failure_events) > 0:
+            (act, link) = self.failure_events.popleft()
+            if act == "up":
+                self.links[link].set_link_up()
+            elif act == "down":
+                self.links[link].set_link_down()
+            else:
+                warning.warn("Unknown event")
+            self.scheduler.reset_execution_steps()
+            self.scheduler.run()
+            if self.scheduler.execution_steps() == 0:
+                warnings.warn("No simulation steps executed.")
+            if self.scheduler.has_exhausted_limit():
+                warnings.warn("Exhausted simulation step limit")
 
     def cycles_over_time(
         self
@@ -149,14 +171,6 @@ class SimulationSetup(object):
         the network"""
         if self.tracer is not None:
             return self.tracer.get_total_time()
-        else:
-            raise Exception("Tracing was not enabled")
-
-    def draw_graph_at_n(self, time: int, axs: Optional[Any] = None) -> None:
-        """When tracing is enabled this function will draw (using matplotlib) the network graph after control message
-        `n` was processed. We assume that someone has already set up matplotlib's plotting environment."""
-        if self.tracer is not None:
-            self.tracer.draw_graph_at_n(time, axs=axs)
         else:
             raise Exception("Tracing was not enabled")
 

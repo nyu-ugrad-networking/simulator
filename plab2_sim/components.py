@@ -573,31 +573,6 @@ class Tracer(object):
         ):
             self.color[self.time][iface.link.uniq] = "black"
 
-    def draw_graph_at_n(self, n: int, axs: Optional[Any] = None) -> None:
-        """Draw the set of active links (in black) and inactive links (in red) after control
-        message `n` was processed."""
-        nx.draw(
-            self.graph,
-            with_labels=True,
-            edge_color=[
-                self.color[n][key] for (_, _, key) in self.graph.edges(keys=True)
-            ],
-            node_size=500,
-            font_size=16,
-            node_color="white",
-            ax=axs,
-        )
-
-    def get_nx_graph_at_n(self, n: int) -> nx.MultiGraph:
-        """Get a connectivity graph after processing control message `n` is processed"""
-        return nx.MultiGraph(
-            [
-                (u, v, k)
-                for u, v, k in self.graph.edges(keys=True)
-                if self.color[n][k] == "black"
-            ]
-        )
-
     def get_cause_at_time(self, n: int) -> str:
         """Get what the n^{th} control message was. This returns a string of the form
         `__repr(data) @ switch ID`, and is why having a good `__repr__` string for your
@@ -635,54 +610,17 @@ class SimObjectHolder(object):
     def get_address_map(self) -> Dict[str, Address]:
         return dict(map(lambda o: (o.get_id(), o.get_address()), self.hosts))
 
-    def get_forwarding_graph_for_host(self, host: str) -> nx.MultiGraph:
+    def get_forwarding_graph_for_host(self, host: str) -> nx.MultiDiGraph:
         g = nx.MultiDiGraph()
         g.add_nodes_from(map(lambda o: o.get_id(), self.net_objects))
-        addresses = self.get_all_addresses()
-        h_obj = self.host_map[host]
-        h_address = h_obj.get_address()
-        h_port = h_obj.get_ports()[0]
-        if h_port.state == PortState.Down or not h_port.link:
-            # Nothing is connected
-            return g
-        h_link = h_port.link
-        h_other_port = h_link.get_other_end(h_port)
-        if not h_other_port:
-            return g
-        first_hop = h_other_port.swtch
-        if not isinstance(first_hop, ForwardingSwitch):
-            raise Exception(
-                "Topology with host connected to something other than a forwarding switch"
-            )
 
         def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
             o_p = c.how_forward(a)
-            if o_p:
+            if o_p and o_p:
                 o = c.get_ports()[o_p]
-                if o.link:
+                if o.link and o.state == PortState.Up:
                     e = o.link.get_other_end(o)
-                    if e:
-                        return e.swtch
-            return None
-
-        for a in addresses:
-            g.add_edge(h_obj.get_id(), first_hop.get_id(), address=a)
-            c = first_hop  # type: NetNode
-            n = get_next_hop(a, first_hop)
-            while n:
-                g.add_edge(c.get_id(), n.get_id(), address=a)
-                c = n
-                n = get_next_hop(a, c)
-        return g
-
-    def get_connectivity_matrix(self) -> Dict[str, Dict[Address, str]]:
-        def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
-            o_p = c.how_forward(a)
-            if o_p:
-                o = c.get_ports()[o_p]
-                if o.link:
-                    e = o.link.get_other_end(o)
-                    if e:
+                    if e and e.state == PortState.Up:
                         return e.swtch
             return None
 
@@ -693,7 +631,60 @@ class SimObjectHolder(object):
                 return None
             h_link = h_port.link
             h_other_port = h_link.get_other_end(h_port)
-            if not h_other_port:
+            if not h_other_port or h_other_port.state != PortState.Up:
+                return None
+            return h_other_port.swtch
+
+        def add_links(s: NetNode, a: Address) -> None:
+            c = s
+            n = get_next_hop(a, c)
+            visited = set()  # type: Set[str]
+            while n is not None:
+                g.add_edge(c.get_id(), n.get_id(), address=a)
+                if n.get_id() in visited:
+                    # We found a loop, so just terminate
+                    # here.
+                    return
+                visited.add(n.get_id())
+                c = n
+                n = get_next_hop(a, c)
+
+        addresses = self.get_all_addresses()
+        h_obj = self.host_map[host]
+        h_address = h_obj.get_address()
+        first_hop = get_first_hop(h_obj)
+        if not first_hop or not isinstance(first_hop, ForwardingSwitch):
+            raise Exception(
+                "Topology with host connected to something other than a forwarding switch"
+            )
+
+        for a in addresses:
+            g.add_edge(h_obj.get_id(), first_hop.get_id(), address=a)
+            add_links(first_hop, a)
+        return g
+
+    def get_connectivity_matrix(self) -> Dict[str, Dict[Address, str]]:
+        """Get the node to which packets sent by a host with a given address are
+        forwarded."""
+
+        def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
+            o_p = c.how_forward(a)
+            if o_p:
+                o = c.get_ports()[o_p]
+                if o.link and o.state == PortState.Up:
+                    e = o.link.get_other_end(o)
+                    if e and e.state == PortState.Up:
+                        return e.swtch
+            return None
+
+        def get_first_hop(h: Host) -> Optional[NetNode]:
+            h_port = h.get_ports()[0]
+            if h_port.state == PortState.Down or not h_port.link:
+                # Nothing is connected
+                return None
+            h_link = h_port.link
+            h_other_port = h_link.get_other_end(h_port)
+            if not h_other_port or h_other_port.state != PortState.Up:
                 return None
             return h_other_port.swtch
 
@@ -723,15 +714,15 @@ class SimObjectHolder(object):
                     output[id][address] = oe.get_id()
         return output
 
-    def check_loop_freedom(self) -> bool:
-        """Check if forwarding is loop free. If so we return True, else
-        return False"""
+    def get_distance_matrix(self) -> Dict[str, Dict[Address, int]]:
+        """Get number of hops a packet sent by a node is forwarded before
+        delivery. We return -1 for cases where a loop is encountered"""
 
         def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
             o_p = c.how_forward(a)
             if o_p:
                 o = c.get_ports()[o_p]
-                if o.link:
+                if o.link and o.state == PortState.Up:
                     e = o.link.get_other_end(o)
                     if e:
                         return e.swtch
@@ -744,7 +735,59 @@ class SimObjectHolder(object):
                 return None
             h_link = h_port.link
             h_other_port = h_link.get_other_end(h_port)
-            if not h_other_port:
+            if not h_other_port or h_other_port.state != PortState.Up:
+                return None
+            return h_other_port.swtch
+
+        def get_distance(s: NetNode, a: Address) -> int:
+            c = s
+            n = get_next_hop(a, c)
+            visited = set()  # type: Set[str]
+            d = 1  # Start at 1 since we are already
+            # one hop away.
+            while n is not None:
+                d += 1
+                if n.get_id() in visited:
+                    # We found a loop, so just terminate
+                    # here.
+                    return -1
+                visited.add(n.get_id())
+                c = n
+                n = get_next_hop(a, c)
+            return False
+
+        addresses = list(self.get_all_addresses())
+        output = {}  # type: Dict[str, Dict[Address, int]]
+        for h in self.hosts:
+            fh = get_first_hop(h)
+            id = h.get_id()
+            for address in addresses:
+                if fh is not None:
+                    output[id][address] = get_distance(fh, address)
+        return output
+
+    def check_loop_freedom(self) -> bool:
+        """Check if forwarding is loop free. If so we return True, else
+        return False"""
+
+        def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
+            o_p = c.how_forward(a)
+            if o_p:
+                o = c.get_ports()[o_p]
+                if o.link and o.state == PortState.Up:
+                    e = o.link.get_other_end(o)
+                    if e:
+                        return e.swtch
+            return None
+
+        def get_first_hop(h: Host) -> Optional[NetNode]:
+            h_port = h.get_ports()[0]
+            if h_port.state == PortState.Down or not h_port.link:
+                # Nothing is connected
+                return None
+            h_link = h_port.link
+            h_other_port = h_link.get_other_end(h_port)
+            if not h_other_port or h_other_port.state != PortState.Up:
                 return None
             return h_other_port.swtch
 
