@@ -449,6 +449,8 @@ class Link(object):
         self.tracer = tracer
         self.state = LinkState.Up
 
+    def __str__(self) -> str:
+        return self.id
     def connect(self, iface: Interface) -> None:
         if self.connects[0] is None:
             self.connects = (iface, self.connects[1])
@@ -616,7 +618,7 @@ class SimObjectHolder(object):
 
         def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
             o_p = c.how_forward(a)
-            if o_p and o_p:
+            if o_p is not None:
                 o = c.get_ports()[o_p]
                 if o.link and o.state == PortState.Up:
                     e = o.link.get_other_end(o)
@@ -669,7 +671,7 @@ class SimObjectHolder(object):
 
         def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
             o_p = c.how_forward(a)
-            if o_p:
+            if o_p is not None:
                 o = c.get_ports()[o_p]
                 if o.link and o.state == PortState.Up:
                     e = o.link.get_other_end(o)
@@ -719,7 +721,7 @@ class SimObjectHolder(object):
 
         def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
             o_p = c.how_forward(a)
-            if o_p and o_p:
+            if o_p is not None:
                 o = c.get_ports()[o_p]
                 if o.link and o.state == PortState.Up:
                     e = o.link.get_other_end(o)
@@ -772,7 +774,7 @@ class SimObjectHolder(object):
 
         def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
             o_p = c.how_forward(a)
-            if o_p:
+            if o_p is not None:
                 o = c.get_ports()[o_p]
                 if o.link and o.state == PortState.Up:
                     e = o.link.get_other_end(o)
@@ -806,7 +808,7 @@ class SimObjectHolder(object):
                 visited.add(n.get_id())
                 c = n
                 n = get_next_hop(a, c)
-            return False
+            return d
 
         addresses = list(self.get_all_addresses())
         output = {}  # type: Dict[str, Dict[Address, int]]
@@ -825,7 +827,7 @@ class SimObjectHolder(object):
 
         def get_next_hop(a: Address, c: NetNode) -> Optional[NetNode]:
             o_p = c.how_forward(a)
-            if o_p:
+            if o_p is not None:
                 o = c.get_ports()[o_p]
                 if o.link and o.state == PortState.Up:
                     e = o.link.get_other_end(o)
