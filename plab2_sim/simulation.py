@@ -53,7 +53,7 @@ class SimpleScheduler(components.Scheduler):
 
     def has_exhausted_limit(self) -> bool:
         """Check whether more events can be executed"""
-        return self.events_executed < self.event_limit
+        return self.events_executed >= self.event_limit
 
     def reset_execution_steps(self) -> None:
         self.events_executed = 0
@@ -90,6 +90,7 @@ class SimulationSetup(object):
         self.nodes = {}  # type: Dict[str, components.NetNode]
         self.hosts = []  # type: List[components.Host]
         self.failure_events = deque(failure_events)  # type: Deque[Tuple[str, str]]
+        self.run_between_failures = []  # type: List[Callable[[], None]]
         for switch in switches:
             sw = components.ForwardingSwitch(switch, nifaces, control(), self.tracer)
             self.nodes[switch] = sw
@@ -113,6 +114,7 @@ class SimulationSetup(object):
             self.nodes[b].get_ifaces()[iface_idx_b].attach(link)
 
             self.links[lid] = link
+            self.holder.add_link(link)
         for sw in self.switches:
             # Initialize the switches
             sw.initialized()
@@ -121,11 +123,17 @@ class SimulationSetup(object):
             # switches of host connectivity.
             ho.send_host_identification()
 
+    def add_hook_between_events(self, hook: Callable[[], None]):
+        """Add a hook function that should be run between link events"""
+        self.run_between_failures.append(hook)
+
     def run(self):
         """Run the scheduling loop to completion"""
         self.scheduler.run()
         if self.scheduler.execution_steps() == 0:
             warnings.warn("No simulation steps executed.")
+        for hook in self.run_between_failures:
+            hook()
         while len(self.failure_events) > 0:
             (act, link) = self.failure_events.popleft()
             if act == "up":
@@ -140,6 +148,8 @@ class SimulationSetup(object):
                 warnings.warn("No simulation steps executed.")
             if self.scheduler.has_exhausted_limit():
                 warnings.warn("Exhausted simulation step limit")
+            for hook in self.run_between_failures:
+                hook()
 
     def cycles_over_time(
         self
