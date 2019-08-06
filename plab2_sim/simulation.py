@@ -151,31 +151,6 @@ class SimulationSetup(object):
             for hook in self.run_between_failures:
                 hook()
 
-    def cycles_over_time(
-        self
-    ) -> Iterator[Tuple[str, Optional[List[Tuple[str, str, int]]]]]:
-        """Returns an iterator (assuming enable_trace was true) that represents cycles in the topology
-        as control packets were processed."""
-
-        def cycles_or_none(g: nx.MultiGraph) -> Optional[List[Tuple[str, str, int]]]:
-            try:
-                return nx.algorithms.cycles.find_cycle(g)
-            except nx.exception.NetworkXNoCycle:
-                return None
-
-        if self.tracer is not None:
-            return map(lambda ce: (ce[0], cycles_or_none(ce[1])), iter(self.tracer))
-        else:
-            return iter([])
-
-    def multigraphs_over_time(self) -> Iterator[Tuple[str, nx.MulitGraph]]:
-        """When tracing is enable, this returns an iterator that can be used to look at graph evolution
-        over time."""
-        if self.tracer is not None:
-            return iter(self.tracer)
-        else:
-            return iter([])
-
     def control_events(self) -> int:
         """When tracing is enabled this function returns the total number of control packets processed in
         the network"""
@@ -209,6 +184,28 @@ class SimulationSetup(object):
             s.send(components.to_data_packet(s.get_address(), d_a, "ping", ttl))
         else:
             raise Exception("%s is not a host" % src_host)
+
+    def get_connectivity_matrix(self) -> Dict[str, Dict[components.Address, str]]:
+        """Returns a dictionary of dictionaries indicating where packets sent by a host with a given address end up."""
+        return self.holder.get_connectivity_matrix()
+
+    def get_distance_matrix(self) -> Dict[str, Dict[components.Address, int]]:
+        """Returns a dictionary of dictionaries containing the Path length from each  host to the destination indicated
+        by an address. In case the destination is not reached we report a path length of -1"""
+        return self.holder.get_distance_matrix()
+
+    def get_paths(self) -> Dict[str, Dict[components.Address, List[str]]]:
+        """A dictionary of dictionaries indicating the path traversed by a packet leaving a host and addressed to an
+        address. In case of loops we merely include the path upto the point at which a previously visited node is hit"""
+        return self.holder.get_paths()
+
+    def physically_connected_components(self) -> List[List[str]]:
+        """Returns a list of list indicating the set of hosts in the graph which are physically connected"""
+        return self.holder.get_physically_connected_hosts()
+
+    def get_forwarding_graph_for_host(self, host: str) -> nx.MultiDiGraph:
+        """Return a networkx digraph with how packets are forwarded starting at the given `host`"""
+        return self.holder.get_forwarding_graph_for_host(host)
 
     @staticmethod
     def from_yml_string(
