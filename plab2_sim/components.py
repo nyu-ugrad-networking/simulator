@@ -253,6 +253,7 @@ class SwitchRep(object):
         dropped."""
         self._sw.send(iface_id, to_control_packet(data))
 
+<<<<<<< HEAD
     def iface_down(self, iface_id: int):
         """Mark interface `iface_id` as down"""
         self._sw.set_iface_down(iface_id)
@@ -264,6 +265,11 @@ class SwitchRep(object):
     def iface_status(self, iface_id: int) -> InterfaceState:
         """Get status for interface `iface_id`"""
         return self.iface_state[iface_id]
+=======
+    def port_status(self, port_id: int):
+        """Get status for port `port_id`"""
+        return self.port_state[port_id]
+>>>>>>> Futz around with tracer
 
     def iface_count(self) -> int:
         """Get the number of interfacess in this switch"""
@@ -280,11 +286,12 @@ class SwitchRep(object):
         return self._sw.get_forwarding_for_address(address)
 
     def get_known_addresses(self) -> List[Address]:
-        """Get all addresses that this switch can forward"""
+        """Get a list of addresses that this switch can forward"""
         return self._sw.get_known_addresses()
 
     def get_forwarding_table(self) -> Dict[Address, int]:
-        """Return the full forwarding table for this switch."""
+        """Return the full forwarding table for this switch as a dictionary from
+        an address to a port IDentifier."""
         return self._sw.get_forwarding_table()
 
     def del_forwarding_entry(self, addr: Address) -> None:
@@ -316,6 +323,7 @@ class ForwardingSwitch(NetNode):
     def get_ifaces(self) -> List[Interface]:
         return self.ifaces
 
+<<<<<<< HEAD
     def set_iface_up(self, iface_id: int) -> InterfaceState:
         self.rep.iface_state[iface_id] = InterfaceState.Up
         if self.is_initialized and self.tracer:
@@ -327,6 +335,15 @@ class ForwardingSwitch(NetNode):
         if self.is_initialized and self.tracer:
             self.tracer.set_iface_down(self.ifaces[iface_id])
         return self.ifaces[iface_id].set_down()
+=======
+    def set_port_up(self, port_id: int) -> PortState:
+        self.rep.port_state[port_id] = PortState.Up
+        return self.ports[port_id].set_up()
+
+    def set_port_down(self, port_id: int) -> PortState:
+        self.rep.port_state[port_id] = PortState.Down
+        return self.ports[port_id].set_down()
+>>>>>>> Futz around with tracer
 
     def update_forwarding_table(self, address: Address, port: int) -> None:
         self.forwarding_table[address] = port
@@ -521,6 +538,14 @@ class Link(object):
                 self.connects[0].notify_link_up()
             if self.connects[1] is not None:
                 self.connects[1].notify_link_up()
+            if (
+                self.tracer is not None
+                and self.connects[0] is not None
+                and self.connects[1] is not None
+            ):
+                self.tracer.add_link(
+                    self.uniq, self.connects[0].sw_id, self.connects[1].sw_id
+                )
 
     def set_link_down(self) -> None:
         if self.state == LinkState.Up:
@@ -537,6 +562,14 @@ class Link(object):
                 self.connects[0].notify_link_down()
             if self.connects[1] is not None:
                 self.connects[1].notify_link_down()
+            if (
+                self.tracer is not None
+                and self.connects[0] is not None
+                and self.connects[1] is not None
+            ):
+                self.tracer.remove_link(
+                    self.uniq, self.connects[0].sw_id, self.connects[1].sw_id
+                )
 
     def link_is_active(self) -> bool:
         return (
@@ -568,23 +601,43 @@ class Tracer(object):
     def __init__(self):
         self.nodes = []
         self.cause = ["initial"]
-        self.graph = nx.MultiGraph()
-        self.color = [defaultdict(lambda: "black")]  # type: List[Dict[int, str]]
         self.time = 0
         self.forwarding_tables = [
             defaultdict(lambda: {})
         ]  # type: List[Dict[str, Dict[Address, int]]]
 
+        self.edges = [set()]  # type: List[Set[Tuple[str, str, int]]]
+        self.past_tracers = []  # type: List[Tracer]
+        self.major_events = ["initial"]
+
+    def snapshot(self, cause: str) -> None:
+        # Make a copy
+        t = Tracer()
+        t.nodes = self.nodes
+        t.cause = self.cause
+        t.forwarding_tables = self.forwarding_tables
+        t.edges = self.edges
+        t.time = self.time
+        self.past_tracers.append(t)
+        self.major_events.append(cause)
+        # Reset ourselves
+        self.cause = [self.cause[-1]]
+        self.time = 0
+        self.forwarding_tables = [self.forwarding_tables[-1].copy()]
+        self.edges = [self.edges[-1].copy()]
+
     def add_node(self, ob: NetNode) -> None:
         self.nodes.append(ob)
-        self.graph.add_node(ob.get_id())
 
     def add_link(self, link_id: int, node0: str, node1: str) -> None:
-        self.graph.add_edge(node0, node1, key=link_id)
+        self.edges[-1].add((node0, node1, link_id))
+
+    def remove_link(self, link_id: int, node0: str, node1: str) -> None:
+        self.edges[-1].remove((node0, node1, link_id))
 
     def process_control_event(self, cause: str) -> None:
-        self.color.append(self.color[-1].copy())
         self.forwarding_tables.append(self.forwarding_tables[-1].copy())
+        self.edges.append(self.edges[-1].copy())
         self.cause.append(cause)
         self.time += 1
 
@@ -599,6 +652,7 @@ class Tracer(object):
     def delete_forwarding_table_entry(self, switch_id: str, address: Address):
         del self.forwarding_tables[self.time][switch_id][address]
 
+<<<<<<< HEAD
     def set_port_down(self, port: Port) -> None:
         if port.link is not None:
             self.color[self.time][port.link.uniq] = "red"
@@ -614,6 +668,8 @@ class Tracer(object):
         ):
             self.color[self.time][iface.link.uniq] = "black"
 
+=======
+>>>>>>> Futz around with tracer
     def get_cause_at_time(self, n: int) -> str:
         """Get what the n^{th} control message was. This returns a string of the form
         `__repr(data) @ switch ID`, and is why having a good `__repr__` string for your

@@ -136,6 +136,8 @@ class SimulationSetup(object):
             hook()
         while len(self.failure_events) > 0:
             (act, link) = self.failure_events.popleft()
+            if self.tracer:
+                self.tracer.snapshot("%s %s" % (act, link))
             if act == "up":
                 self.links[link].set_link_up()
             elif act == "down":
@@ -199,7 +201,7 @@ class SimulationSetup(object):
         address. In case of loops we merely include the path upto the point at which a previously visited node is hit"""
         return self.holder.get_paths()
 
-    def physically_connected_components(self) -> List[List[str]]:
+    def get_physically_connected_components(self) -> List[List[str]]:
         """Returns a list of list indicating the set of hosts in the graph which are physically connected"""
         return self.holder.get_physically_connected_hosts()
 
