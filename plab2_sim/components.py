@@ -789,7 +789,7 @@ class SimObjectHolder(object):
         """Get number of hops a packet sent by a node is forwarded before
         delivery. We return -1 for cases where a loop is encountered"""
 
-        def get_distance(s: NetNode, a: Address) -> int:
+        def get_distance(s: NetNode, a: Address, h: str) -> int:
             c = s
             n = self.get_next_hop(a, c)
             visited = set(c.get_id())  # type: Set[str]
@@ -804,17 +804,21 @@ class SimObjectHolder(object):
                 visited.add(n.get_id())
                 c = n
                 n = self.get_next_hop(a, c)
-            return d
+            if c.get_id() == h:
+                return d
+            else:
+                return -1
 
-        addresses = list(self.get_all_addresses())
+        # addresses = list(self.get_all_addresses())
+        addresses = self.get_address_map()
         output = {}  # type: Dict[str, Dict[Address, int]]
         for h in self.hosts:
             fh = self.get_first_hop(h)
             id = h.get_id()
             output[id] = {}
-            for address in addresses:
+            for host, address in addresses.items():
                 if fh is not None:
-                    output[id][address] = get_distance(fh, address)
+                    output[id][address] = get_distance(fh, address, host)
         return output
 
     def check_loop_freedom(self) -> bool:
