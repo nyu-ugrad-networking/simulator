@@ -253,7 +253,6 @@ class SwitchRep(object):
         dropped."""
         self._sw.send(iface_id, to_control_packet(data))
 
-<<<<<<< HEAD
     def iface_down(self, iface_id: int):
         """Mark interface `iface_id` as down"""
         self._sw.set_iface_down(iface_id)
@@ -265,11 +264,6 @@ class SwitchRep(object):
     def iface_status(self, iface_id: int) -> InterfaceState:
         """Get status for interface `iface_id`"""
         return self.iface_state[iface_id]
-=======
-    def port_status(self, port_id: int):
-        """Get status for port `port_id`"""
-        return self.port_state[port_id]
->>>>>>> Futz around with tracer
 
     def iface_count(self) -> int:
         """Get the number of interfacess in this switch"""
@@ -323,7 +317,6 @@ class ForwardingSwitch(NetNode):
     def get_ifaces(self) -> List[Interface]:
         return self.ifaces
 
-<<<<<<< HEAD
     def set_iface_up(self, iface_id: int) -> InterfaceState:
         self.rep.iface_state[iface_id] = InterfaceState.Up
         if self.is_initialized and self.tracer:
@@ -335,15 +328,6 @@ class ForwardingSwitch(NetNode):
         if self.is_initialized and self.tracer:
             self.tracer.set_iface_down(self.ifaces[iface_id])
         return self.ifaces[iface_id].set_down()
-=======
-    def set_port_up(self, port_id: int) -> PortState:
-        self.rep.port_state[port_id] = PortState.Up
-        return self.ports[port_id].set_up()
-
-    def set_port_down(self, port_id: int) -> PortState:
-        self.rep.port_state[port_id] = PortState.Down
-        return self.ports[port_id].set_down()
->>>>>>> Futz around with tracer
 
     def update_forwarding_table(self, address: Address, port: int) -> None:
         self.forwarding_table[address] = port
@@ -644,19 +628,12 @@ class Tracer(object):
     def update_forwarding_table(self, switch_id: str, address: Address, port: int):
         self.forwarding_tables[self.time][switch_id][address] = port
 
-<<<<<<< HEAD
-    def set_iface_down(self, iface: Interface) -> None:
-        if iface.link is not None:
-            self.color[self.time][iface.link.uniq] = "red"
-=======
     def delete_forwarding_table_entry(self, switch_id: str, address: Address):
         del self.forwarding_tables[self.time][switch_id][address]
 
-<<<<<<< HEAD
-    def set_port_down(self, port: Port) -> None:
-        if port.link is not None:
-            self.color[self.time][port.link.uniq] = "red"
->>>>>>> More debugging
+    def set_iface_down(self, iface: Interface) -> None:
+        if iface.link is not None:
+            self.color[self.time][iface.link.uniq] = "red"
 
     def set_iface_up(self, iface: Interface) -> None:
         if (
@@ -668,8 +645,6 @@ class Tracer(object):
         ):
             self.color[self.time][iface.link.uniq] = "black"
 
-=======
->>>>>>> Futz around with tracer
     def get_cause_at_time(self, n: int) -> str:
         """Get what the n^{th} control message was. This returns a string of the form
         `__repr(data) @ switch ID`, and is why having a good `__repr__` string for your
@@ -694,6 +669,7 @@ class SimObjectHolder(object):
         self.net_objects = []  # type: List[NetNode]
         self.hosts = []  # type: List[Host]
         self.host_map = {}  # type: Dict[str, Host]
+        self.switches = [] # type: List[ForwardingSwitch]
         self.links = []  # type: List[Link]
 
     def add_net_object(self, ob: NetNode):
@@ -701,6 +677,8 @@ class SimObjectHolder(object):
         if isinstance(ob, Host):
             self.hosts.append(ob)
             self.host_map[ob.get_id()] = ob
+        elif isinstance(ob, ForwardingSwitch):
+            self.switches.append(ob)
 
     def add_link(self, l: Link):
         self.links.append(l)
@@ -779,6 +757,15 @@ class SimObjectHolder(object):
         return list(
             map(lambda c: list(filter(lambda n: n in self.host_map, c)), components)
         )
+
+    def get_forwarding_tables(self) -> Dict[str, Dict[Address, int]]:
+        """Dump the forwarding table for all switches. This is returned as a 
+        dictionary from switch ID to a dictionary form addresses to port numbers.
+        Note, port numbers are not globally unique"""
+        r = {}
+        for s in self.switches:
+            r[s.get_id()] = s.get_forwarding_table()
+        return r
 
     def get_connectivity_matrix(self) -> Dict[str, Dict[Address, str]]:
         """Get the node to which packets sent by a host with a given address are

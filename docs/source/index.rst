@@ -10,9 +10,9 @@ Project 1 Documentation
    :maxdepth: 2
    :caption: Contents:
 
-Module `plab1_sim`
+Module `plab2_sim`
 ------------------
-.. automodule:: plab1_sim
+.. automodule:: plab2_sim
    :members:
    :no-undoc-members:
 

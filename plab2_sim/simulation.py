@@ -209,6 +209,12 @@ class SimulationSetup(object):
         """Return a networkx digraph with how packets are forwarded starting at the given `host`"""
         return self.holder.get_forwarding_graph_for_host(host)
 
+    def get_forwarding_tables(self) -> Dict[str, Dict[components.Address, int]]:
+        """Dump the forwarding table for all switches. This is returned as a 
+        dictionary from switch ID to a dictionary form addresses to port numbers.
+        Note, port numbers are not globally unique"""
+        return self.holder.get_forwarding_tables()
+
     @staticmethod
     def from_yml_string(
         s: str, enable_trace: bool, control: Callable[[], components.ControlPlane]
