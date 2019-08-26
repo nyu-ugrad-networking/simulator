@@ -130,9 +130,15 @@ class SwitchRep(object):
     for port state."""
 
     def __init__(self, sw: DumbSwitch):
-        self.id = sw.id
+        self._id = sw.id
         self.port_state = [p.state for p in sw.ports]
         self._sw = sw
+
+    @property
+    def id(self) -> str:
+        """Get a unique switch ID. The ID is both unique and can be compared to
+        IDs for other switches. The ID is also guaranteed to have a total order."""
+        return self._id
 
     def send_control(self, port_id: int, data: Any):
         """Send a control message out port `port_id`. Note
