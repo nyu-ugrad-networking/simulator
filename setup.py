@@ -10,7 +10,7 @@ setup(
     author="Aurojit Panda",
     author_email="apanada@cs.nyu.edu.edu",
     packages=find_packages(),
-    package_data={"plab1_sim": ["py.typed"]},
+    package_data={"plab2_sim": ["py.typed"]},
     install_requires=["networkx", "pyyaml", "matplotlib"],
     license="CRAPL",
 )

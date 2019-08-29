@@ -120,12 +120,12 @@ class ControlPlane(object):
         """
         raise NotImplementedError
 
-    def process_link_up(self, switch: SwitchRep, port_id: int) -> None:
-        """Called when the link connected to port `port_id` recovers and thus becomes available."""
+    def process_link_up(self, switch: SwitchRep, iface_id: int) -> None:
+        """Called when the link connected to interface `iface_id` recovers and thus becomes available."""
         raise NotImplementedError
 
-    def process_link_down(self, switch: SwitchRep, port_id: int) -> None:
-        """Called when the link connected to port `port_id` fails and thus becomes unavailable."""
+    def process_link_down(self, switch: SwitchRep, iface_id: int) -> None:
+        """Called when the link connected to interface `iface_id` fails and thus becomes unavailable."""
         raise NotImplementedError
 
 
@@ -144,10 +144,10 @@ class NetNode(object):
     def get_ifaces(self) -> List[Interface]:
         raise NotImplementedError
 
-    def notify_link_up(self, port_id: int) -> None:
+    def notify_link_up(self, iface_id: int) -> None:
         raise NotImplementedError
 
-    def notify_link_down(self, port_id: int) -> None:
+    def notify_link_down(self, iface_id: int) -> None:
         raise NotImplementedError
 
     def how_forward(self, a: Address) -> Optional[int]:
@@ -219,12 +219,12 @@ class Host(NetNode):
 
     def send_host_identification(self) -> None:
         packet = to_control_packet(HostIdentification(self.id, self.address))
-        self.port.send(packet)
+        self.iface.send(packet)
 
-    def notify_link_up(self, port_id: int) -> None:
+    def notify_link_up(self, iface_id: int) -> None:
         return  # Nothing to really do here, hosts are not handling this.
 
-    def notify_link_down(self, port_id: int) -> None:
+    def notify_link_down(self, iface_id: int) -> None:
         return  # Nothing to really do here.
 
     def how_forward(self, a: Address) -> Optional[int]:
@@ -269,10 +269,10 @@ class SwitchRep(object):
         """Get the number of interfacess in this switch"""
         return len(self.iface_state)
 
-    def update_forwarding_table(self, address: Address, port: int) -> None:
+    def update_forwarding_table(self, address: Address, iface_id: int) -> None:
         """Update forwarding table so packets destined to `address` will
-        be forwarded out `port`"""
-        self._sw.update_forwarding_table(address, port)
+        be forwarded out interface `iface_id`"""
+        self._sw.update_forwarding_table(address, iface_id)
 
     def get_forwarding_for_address(self, address: Address) -> Optional[int]:
         """Retrieve how packets destined to `address` are forwarded. In case
@@ -285,11 +285,11 @@ class SwitchRep(object):
 
     def get_forwarding_table(self) -> Dict[Address, int]:
         """Return the full forwarding table for this switch as a dictionary from
-        an address to a port IDentifier."""
+        an address to a interface."""
         return self._sw.get_forwarding_table()
 
     def del_forwarding_entry(self, addr: Address) -> None:
-        """Delete entry for address a"""
+        """Deletes forwarding entry for address addr"""
         self._sw.delete_forwarding_entry(addr)
 
 
@@ -329,10 +329,10 @@ class ForwardingSwitch(NetNode):
             self.tracer.set_iface_down(self.ifaces[iface_id])
         return self.ifaces[iface_id].set_down()
 
-    def update_forwarding_table(self, address: Address, port: int) -> None:
-        self.forwarding_table[address] = port
+    def update_forwarding_table(self, address: Address, iface_id: int) -> None:
+        self.forwarding_table[address] = iface_id
         if self.tracer:
-            self.tracer.update_forwarding_table(self.id, address, port)
+            self.tracer.update_forwarding_table(self.id, address, iface_id)
 
     def get_forwarding_for_address(self, address: Address) -> Optional[int]:
         return self.forwarding_table.get(address, None)
@@ -355,9 +355,8 @@ class ForwardingSwitch(NetNode):
 
     def recv(self, iface_id: int, packet: Packet) -> None:
         def broadcast():
-            for idx, p in enumerate(self.ports):
-                if (idx != port_id and
-                    self.ifaces[iface_id].state == InterfaceState.Up):
+            for idx, p in enumerate(self.ifaces):
+                if idx != iface_id and self.ifaces[iface_id].state == InterfaceState.Up:
                     pkt = copy.deepcopy(packet)
                     pkt.ttl -= 1
                     p.send(pkt)
@@ -370,19 +369,21 @@ class ForwardingSwitch(NetNode):
                 return
             if isinstance(packet, AddressablePacket):
                 if packet.destination in self.forwarding_table:
-                    out_port = self.forwarding_table[packet.destination]
-                    if out_port == port_id:
+                    out_iface = self.forwarding_table[packet.destination]
+                    if out_iface == iface_id:
                         warnings.warn(
-                            "Switch %s is forwarding packet to destination %d out the port it was received"
+                            "Switch %s is forwarding packet to destination %d out the interface it was received"
                             % (self.id, packet.destination)
                         )
-                    if self.ifaces[out_port].state != InterfaceState.Up:
+                    if self.ifaces[out_iface].state != InterfaceState.Up:
                         warnings.warn(
-                            "Switch %s dropping packet out disabled interface"%(self.id))
+                            "Switch %s dropping packet out disabled interface"
+                            % (self.id)
+                        )
                         return
                     # Do not need to deepcopy here since only one copy :)
                     packet.ttl -= 1
-                    self.ports[out_port].send(packet)
+                    self.ifaces[out_iface].send(packet)
                 elif packet.destination == BroadcastAddress:
                     broadcast()
             else:
@@ -398,11 +399,11 @@ class ForwardingSwitch(NetNode):
     def send(self, iface_id: int, packet: Packet) -> None:
         self.ifaces[iface_id].send(packet)
 
-    def notify_link_up(self, port_id: int) -> None:
-        self.control.process_link_up(self.rep, port_id)
+    def notify_link_up(self, iface_id: int) -> None:
+        self.control.process_link_up(self.rep, iface_id)
 
-    def notify_link_down(self, port_id: int) -> None:
-        self.control.process_link_down(self.rep, port_id)
+    def notify_link_down(self, iface_id: int) -> None:
+        self.control.process_link_down(self.rep, iface_id)
 
     def how_forward(self, a: Address) -> Optional[int]:
         return self.forwarding_table.get(a, None)
@@ -489,13 +490,13 @@ class Link(object):
                 self.uniq, self.connects[0].sw_id, self.connects[1].sw_id
             )
 
-    def get_other_end(self, port: Port) -> Optional[Port]:
-        if port is self.connects[0]:
+    def get_other_end(self, iface: Interface) -> Optional[Interface]:
+        if iface is self.connects[0]:
             return self.connects[1]
-        elif port is self.connects[1]:
+        elif iface is self.connects[1]:
             return self.connects[0]
         else:
-            raise (BadSender(self.id, port))
+            raise (BadSender(self.id, iface))
 
     def send(self, iface: Interface, packet: Packet) -> None:
         if iface is self.connects[0] and self.connects[1] is not None:
@@ -533,6 +534,10 @@ class Link(object):
 
     def set_link_down(self) -> None:
         if self.state == LinkState.Up:
+            print(
+                "%s %s %s is down"
+                % (self.id, str(self.connects[0]), str(self.connects[1]))
+            )
             self.state = LinkState.Down
             if (
                 self.tracer is not None
@@ -560,8 +565,8 @@ class Link(object):
             self.state == LinkState.Up
             and self.connects[0] is not None
             and self.connects[1] is not None
-            and self.connects[0].state == PortState.Up
-            and self.connects[1].state == PortState.Up
+            and self.connects[0].state == InterfaceState.Up
+            and self.connects[1].state == InterfaceState.Up
         )
 
 
@@ -625,25 +630,17 @@ class Tracer(object):
         self.cause.append(cause)
         self.time += 1
 
-    def update_forwarding_table(self, switch_id: str, address: Address, port: int):
-        self.forwarding_tables[self.time][switch_id][address] = port
+    def update_forwarding_table(self, switch_id: str, address: Address, iface_id: int):
+        self.forwarding_tables[self.time][switch_id][address] = iface_id
 
     def delete_forwarding_table_entry(self, switch_id: str, address: Address):
         del self.forwarding_tables[self.time][switch_id][address]
 
     def set_iface_down(self, iface: Interface) -> None:
-        if iface.link is not None:
-            self.color[self.time][iface.link.uniq] = "red"
+        pass
 
     def set_iface_up(self, iface: Interface) -> None:
-        if (
-            iface.link is not None
-            and iface.link.connects[0] is not None
-            and iface.link.connects[1] is not None
-            and iface.link.connects[0].state == InterfaceState.Up
-            and iface.link.connects[1].state == InterfaceState.Up
-        ):
-            self.color[self.time][iface.link.uniq] = "black"
+        pass
 
     def get_cause_at_time(self, n: int) -> str:
         """Get what the n^{th} control message was. This returns a string of the form
@@ -669,7 +666,7 @@ class SimObjectHolder(object):
         self.net_objects = []  # type: List[NetNode]
         self.hosts = []  # type: List[Host]
         self.host_map = {}  # type: Dict[str, Host]
-        self.switches = [] # type: List[ForwardingSwitch]
+        self.switches = []  # type: List[ForwardingSwitch]
         self.links = []  # type: List[Link]
 
     def add_net_object(self, ob: NetNode):
@@ -692,23 +689,23 @@ class SimObjectHolder(object):
     def get_next_hop(self, a: Address, c: NetNode) -> Optional[NetNode]:
         o_p = c.how_forward(a)
         if o_p is not None:
-            o = c.get_ports()[o_p]
+            o = c.get_ifaces()[o_p]
             if o.link and o.link.link_is_active():
                 e = o.link.get_other_end(o)
-                if e and e.state == PortState.Up:
+                if e and e.state == InterfaceState.Up:
                     return e.swtch
         return None
 
     def get_first_hop(self, h: Host) -> Optional[NetNode]:
-        h_port = h.get_ports()[0]
-        if h_port.state == PortState.Down or not h_port.link:
+        h_iface = h.get_ifaces()[0]
+        if h_iface.state == InterfaceState.Down or not h_iface.link:
             # Nothing is connected
             return None
-        h_link = h_port.link
-        h_other_port = h_link.get_other_end(h_port)
-        if not h_other_port or not h_link.link_is_active():
+        h_link = h_iface.link
+        h_other_iface = h_link.get_other_end(h_iface)
+        if not h_other_iface or not h_link.link_is_active():
             return None
-        return h_other_port.swtch
+        return h_other_iface.swtch
 
     def get_forwarding_graph_for_host(self, host: str) -> nx.MultiDiGraph:
         g = nx.MultiDiGraph()
@@ -760,8 +757,8 @@ class SimObjectHolder(object):
 
     def get_forwarding_tables(self) -> Dict[str, Dict[Address, int]]:
         """Dump the forwarding table for all switches. This is returned as a 
-        dictionary from switch ID to a dictionary form addresses to port numbers.
-        Note, port numbers are not globally unique"""
+        dictionary from switch ID to a dictionary form addresses to interface IDss.
+        Note, interface IDs are not globally unique."""
         r = {}
         for s in self.switches:
             r[s.get_id()] = s.get_forwarding_table()

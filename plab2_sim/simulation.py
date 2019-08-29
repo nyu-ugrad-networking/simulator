@@ -69,16 +69,16 @@ class SimulationSetup(object):
         hosts: Dict[str, components.Address],
         switches: List[str],
         nifaces: int,
-        edges: List[Tuple[str, str]],
+        edges: List[Tuple[str, str, str]],
         enable_trace: bool,
         control: Callable[[], components.ControlPlane],
-        simulataneous_events: int = 1024,
+        simultaneous_events: int = 1024,
         total_event_budget: int = 10000,
         failure_events=[],
     ):
         """We do not recommend directly calling this function, and instead recommend calling
         the static initializers"""
-        self.scheduler = SimpleScheduler(simulataneous_events, total_event_budget)
+        self.scheduler = SimpleScheduler(simultaneous_events, total_event_budget)
         self.edges = edges
         self.control_factory = control
         if enable_trace:
@@ -102,7 +102,7 @@ class SimulationSetup(object):
             self.holder.add_net_object(ho)
             self.hosts.append(ho)
         connected_iface_counts = defaultdict(lambda: 0)  # type: Dict[str, int]
-        self.links = []  # type: List[components.Link]
+        self.links = {}  # type: Dict[str, components.Link]
         for (a, b, lid) in edges:
             link = components.Link("%s--%s" % (a, b), self.scheduler, self.tracer)
             iface_idx_a = connected_iface_counts[a]
