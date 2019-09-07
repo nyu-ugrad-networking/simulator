@@ -80,11 +80,12 @@ class ControlPlane(object):
         `switch` can be used to perform operations on the underlying switch.
         Data here is a Python object sent (e.g., by calling the `send_control` method on `SwitchRep`).
         When called user code has a few options:
-        - Do nothing
-        - Set an interface up (i.e., allow data to be sent and received through it) by calling sw.iface_up(id)
-        - Set an interface down by calling sw.iface_down(id)
-        - Send packets by calling sw.send_control.
-        - Update internal state.
+
+        * Do nothing
+        * Set an interface up (i.e., allow data to be sent and received through it) by calling sw.iface_up(id)
+        * Set an interface down by calling sw.iface_down(id)
+        * Send packets by calling sw.send_control.
+        * Update internal state.
         """
         raise NotImplementedError
 
