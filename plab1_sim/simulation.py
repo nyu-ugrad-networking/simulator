@@ -60,7 +60,7 @@ class SimulationSetup(object):
         self,
         hosts: List[str],
         switches: List[str],
-        nports: int,
+        nifaces: int,
         edges: List[Tuple[str, str]],
         enable_trace: bool,
         control: Callable[[], components.ControlPlane],
@@ -80,7 +80,7 @@ class SimulationSetup(object):
         self.switches = []  # type: List[components.DumbSwitch]
         self.nodes = {}  # type: Dict[str, components.NetNode]
         for switch in switches:
-            sw = components.DumbSwitch(switch, nports, control(), self.tracer)
+            sw = components.DumbSwitch(switch, nifaces, control(), self.tracer)
             self.nodes[switch] = sw
             self.switches.append(sw)
             self.holder.add_net_object(sw)
@@ -88,17 +88,17 @@ class SimulationSetup(object):
             ho = components.Host(host, self.tracer)
             self.nodes[host] = ho
             self.holder.add_net_object(ho)
-        connected_port_counts = defaultdict(lambda: 0)  # type: Dict[str, int]
+        connected_iface_counts = defaultdict(lambda: 0)  # type: Dict[str, int]
         self.links = []  # type: List[components.Link]
         for (a, b) in edges:
             link = components.Link("%s--%s" % (a, b), self.scheduler, self.tracer)
-            port_idx_a = connected_port_counts[a]
-            connected_port_counts[a] += 1
-            self.nodes[a].get_ports()[port_idx_a].attach(link)
+            iface_idx_a = connected_iface_counts[a]
+            connected_iface_counts[a] += 1
+            self.nodes[a].get_ifaces()[iface_idx_a].attach(link)
 
-            port_idx_b = connected_port_counts[b]
-            connected_port_counts[b] += 1
-            self.nodes[b].get_ports()[port_idx_b].attach(link)
+            iface_idx_b = connected_iface_counts[b]
+            connected_iface_counts[b] += 1
+            self.nodes[b].get_ifaces()[iface_idx_b].attach(link)
 
             self.links.append(link)
         for sw in self.switches:

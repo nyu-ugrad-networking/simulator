@@ -2,7 +2,7 @@ from .components import *
 from .simulation import *
 
 __all__ = [
-    "PortState",
+    "InterfaceState",
     "ControlPlane",
     "SwitchRep",
     "SimObjectHolder",
