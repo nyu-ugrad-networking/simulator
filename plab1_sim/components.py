@@ -57,10 +57,10 @@ class InterfaceState(Enum):
 
     Up = (
         1
-    )  #: Interface is UP, i.e., packets will be sent and received on the interface.
+    )  #: Interface is UP, i.e., data packets will be sent and received on the interface.
     Down = (
         2
-    )  #: Interface is DOWN, i.e. packets **will not** be send and received on the interface.
+    )  #: Interface is DOWN, i.e. data packets **will not** be send and received on the interface.
 
 
 class ControlPlane(object):
@@ -210,12 +210,14 @@ class DumbSwitch(NetNode):
 
     def recv(self, iface_id: int, packet: Packet) -> None:
         if packet.type == PacketType.Data:
+            if self.ifaces[iface_id].state == InterfaceState.Down:
+                return
             if packet.ttl == 0:
                 warnings.warn("Dropping packet because TTL exceeded")
                 return
             print("%s: forwarding data packet (%d)" % (self.id, packet.ttl))
             for idx, p in enumerate(self.ifaces):
-                if idx != iface_id:
+                if idx != iface_id and p.state == InterfaceState.Up:
                     pkt = copy.deepcopy(packet)
                     pkt.ttl -= 1
                     p.send(pkt)
@@ -253,15 +255,14 @@ class Interface(object):
         return self.state
 
     def send(self, packet: Packet) -> bool:
-        if self.link and self.state == InterfaceState.Up:
+        if self.link:
             self.link.send(self, packet)
             return True
         else:
             return False
 
     def recv(self, packet: Packet):
-        if self.state == InterfaceState.Up:
-            self.swtch.recv(self.id, packet)
+        self.swtch.recv(self.id, packet)
 
 
 class Link(object):
