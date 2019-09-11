@@ -160,7 +160,7 @@ class SwitchRep(object):
         """Mark interface `iface_id` as up"""
         self._sw.set_iface_up(iface_id)
 
-    def iface_status(self, iface_id: int):
+    def iface_status(self, iface_id: int) -> InterfaceState:
         """Get status for interface `iface_id`"""
         return self.iface_state[iface_id]
 
