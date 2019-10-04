@@ -499,7 +499,7 @@ class Link(object):
             raise (BadSender(self.id, iface))
 
     def send(self, iface: Interface, packet: Packet) -> None:
-        if self.state == LinkState.DOWN:
+        if self.state == LinkState.Down:
             return
         if iface is self.connects[0] and self.connects[1] is not None:
             p = self.connects[1]
